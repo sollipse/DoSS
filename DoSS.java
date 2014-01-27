@@ -2,11 +2,11 @@
  *
  * CS61C Spring 2013 Project 2: Small World
  *
- * Partner 1 Name:
- * Partner 1 Login:
+ * Partner 1 Name: Lucas Sloan
+ * Partner 1 Login: cs61c-dk
  *
- * Partner 2 Name:
- * Partner 2 Login:
+ * Partner 2 Name: Paul Kang
+ * Partner 2 Login: cs61c-en
  *
  * REMINDERS: 
  *
@@ -27,6 +27,7 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.io.LongWritable;
+import org.apache.hadoop.io.BooleanWritable;
 import org.apache.hadoop.io.MapWritable;
 import org.apache.hadoop.io.ArrayWritable;
 import org.apache.hadoop.io.Writable;
@@ -46,10 +47,13 @@ public class SmallWorld {
     // Maximum depth for any breadth-first search
     public static final int MAX_ITERATIONS = 20;
     
+    /* NEGATIVE TWO LongWritable value to simplify casting and typing later.  */
     public static final LongWritable NEGATIVETWO = new LongWritable(-2L);
 
     public static final LongWritable NEGATIVEONE = new LongWritable(-1L);
 
+    /** Wrapper for ArrayWritable class that allows us to convert arrays of
+	LongWritables quickly to ArrayWritables **/
     public static class LongArrayWritable extends ArrayWritable {
 	public LongArrayWritable() {
 	    super(LongWritable.class);
@@ -60,6 +64,9 @@ public class SmallWorld {
 	}
     }
 
+    /** NodeWritable Class. Consists of 2 fields: arraywritable that contains neighbors and
+	MapWritable that contains SOURCE Key and DISTANCE value pair.
+    **/
     public static class NodeWritable implements Writable {
 	public LongArrayWritable _neighbors;
 	public MapWritable _distances;
@@ -86,11 +93,50 @@ public class SmallWorld {
 	}
     }
 
+    public static class Notification implements Writable {
+	BooleanWritable _orginal;
+	LongArrayWritable _neighbors;
+	LongArrayWritable _distances;
 
-    /* The first mapper. Part of the graph loading process, currently just an 
-     * identity function. Modify as you wish. */
+	public Notification(LongArrayWritable neighbors, LongArrayWritable distances) {
+	    _neighbors = neighbors;
+	    _distances = distances;
+	    _orginal = new BooleanWritable(true);
+	}
+
+	public Notification(LongArrayWritable distances) {
+	    LongWritable[] nullLong = new LongWritable[1];
+	    nullLong[0] = new LongWritable(-1L);
+	    _neighbors = new LongArrayWritable(nullLong);
+	    _distances = distances;
+	    _orginal = new BooleanWritable(false);
+	}
+
+	public Notification() {}
+
+	public void write(DataOutput out) throws IOException {
+	    _orginal.write(out);
+	    _neighbors.write(out);
+	    _distances.write(out);
+	}
+
+	public void readFields(DataInput in) throws IOException {
+	    BooleanWritable temporginal = new BooleanWritable();
+	    LongArrayWritable tempneighbors = new LongArrayWritable();
+	    LongArrayWritable tempdistances = new LongArrayWritable();
+	    temporginal.readFields(in);
+	    tempneighbors.readFields(in);
+	    tempdistances.readFields(in);
+	    _orginal = temporginal;
+	    _neighbors = tempneighbors;
+	    _distances = tempdistances;
+	}
+    }
+
+    /* Second Mapper. Applies the Breadth-first search pseudocode and returns appropriate kvp
+     of NODENAME and NODE ITSELF. */
     public static class BFSMap extends Mapper<LongWritable, NodeWritable, 
-				       LongWritable, NodeWritable> {
+				       LongWritable, Notification> {
 
 	public long depth;
 
@@ -102,27 +148,37 @@ public class SmallWorld {
 	    //System.out.println("Current depth is " + depth);
 
 	    Iterator<Writable> iterator = value._distances.keySet().iterator();
+	    int size = value._distances.size();
+	    int i = 0;
+	    LongWritable[] output = new LongWritable[size * 2];
 	    while(iterator.hasNext()){
 		LongWritable source = (LongWritable) iterator.next();
-		if (((LongWritable) value._distances.get(source)).get() == depth - 1L) {
-		    LongWritable[] nullLong = new LongWritable[1];
-		    nullLong[0] = new LongWritable(-1L);
-		    LongArrayWritable nullNeighbor = new LongArrayWritable(nullLong);
-		    MapWritable notification = new MapWritable();
-		    notification.put(source, new LongWritable(depth));
+		LongWritable distance = (LongWritable) value._distances.get(source);
+		output[i] = source;
+		output[i + 1] = distance;
+		if (distance.get() == depth - 1L) {
+		    LongWritable[] note = new LongWritable[2];
+		    note[0] = source;
+		    note[1] = new LongWritable(depth);
+		    LongArrayWritable notification = new LongArrayWritable(note);
 		    for (Writable temp : value._neighbors.get()) {
 			LongWritable neighbor = (LongWritable) temp;
 			if (neighbor.get() >= 0L) {
 			    //System.out.print("Depth " + depth + " Notifying " + neighbor.get());
-			    context.write(neighbor, new NodeWritable(nullNeighbor, notification));
+			    context.write(neighbor, new Notification(notification));
 			}
 		    }
 		}
+		i += 2;
 	    }
-            context.write(key, value);
+	    
+            context.write(key, new Notification(value._neighbors, new LongArrayWritable(output)));
         }
     }
-
+    /** First map. Simple loader that takes list of edge pairs and constructs 
+	neighbor-relations from them. NOTE: to account for isolated nodes, the value -2 is 
+	written in as a neighbor, and in the event that a node has NO neighbors, a special
+	case is assigned to context.write. **/
     public static class LoaderMap extends Mapper<LongWritable, LongWritable, 
 					  LongWritable, LongWritable> {
 
@@ -133,6 +189,9 @@ public class SmallWorld {
 	    context.write(value, NEGATIVETWO);
         }
     }
+    /** Third map. Takes nodes from second mapper, retrieves different distances, then uses distances as keys
+	to sum up values to. Essentially a histogram-maker.
+    **/
 
     public static class OutputMap extends Mapper<LongWritable, NodeWritable,
 					  LongWritable, LongWritable> {
@@ -151,25 +210,21 @@ public class SmallWorld {
 
 
 
-    /* The first reducer. This is also currently an identity function (although it
-     * does break the input Iterable back into individual values). Modify it
-     * as you wish. In this reducer, you'll also find an example of loading
-     * and using the denom field.  
+    /* Second Reducer. Assigns the appropriate values to both source and distances. Sends the 
+       new nodes, with collated distances to the third mapper to turn distance data into histograms.
      */
-    public static class BFSReduce extends Reducer<LongWritable, NodeWritable, 
+    public static class BFSReduce extends Reducer<LongWritable, Notification, 
 					  LongWritable, NodeWritable> {
 
         public long denom;
 
 	public long depth;
 
-        public void reduce(LongWritable key, Iterable<NodeWritable> values, 
+        public void reduce(LongWritable key, Iterable<Notification> values, 
 			   Context context) throws IOException, InterruptedException {
             // We can grab the denom field from context: 
             denom = Long.parseLong(context.getConfiguration().get("denom"));
 	    depth = Long.parseLong(context.getConfiguration().get("depth"));
-	    System.out.println("Current depth is " + depth);
-
             // You can print it out by uncommenting the following line:
             //System.out.println(denom);
 
@@ -177,22 +232,25 @@ public class SmallWorld {
             if (depth != 0) {
 		MapWritable outdistances = new MapWritable();
 		LongArrayWritable outneighbors = new LongArrayWritable();
-		for (NodeWritable value : values) {
-		    if (((LongWritable) value._neighbors.get()[0]).get() != -1L) {
+		LongWritable curdepth = new LongWritable(depth);
+		for (Notification value : values) {
+		    if (value._orginal.get()) {
 			outneighbors = value._neighbors;
-		    }
-		    Iterator<Writable> iterator = value._distances.keySet().iterator();
-		    while(iterator.hasNext()){
-			LongWritable source = (LongWritable) iterator.next();
-			if (!outdistances.containsKey(source) || ((LongWritable)outdistances.get(source)).get() > ((LongWritable) value._distances.get(source)).get()) {
-			    System.out.println("Adding source " + source.get() + " with distance " + ((LongWritable) value._distances.get(source)).get());
-			    outdistances.put(source, value._distances.get(source));
+			Writable[] neighs = value._distances.get();
+			for (int i = 0 ; i < neighs.length ; i += 2) {
+			    outdistances.put((LongWritable) neighs[i], (LongWritable) neighs[i + 1]);
+			}
+		    } else {
+			Writable[] neighs = value._distances.get();
+			if (!outdistances.containsKey((LongWritable) neighs[0])) {
+			    outdistances.put((LongWritable) neighs[0], (LongWritable) neighs[1]);
 			}
 		    }
 		}
 		context.write(key, new NodeWritable(outneighbors, outdistances));
 	    } else {
-		for (NodeWritable temp : values) {
+		for (Notification value : values) {
+		    NodeWritable temp = new NodeWritable(value._neighbors, new MapWritable());
 		    if (Math.random() <= (1.0 / denom)) {
 			temp._distances.put(key, new LongWritable(0));
 		    }
@@ -203,6 +261,10 @@ public class SmallWorld {
 
     }
 
+    /** First reducer. After taking a SOURCENODE and a NEIGHBORNODE from its mapper,
+	it searches to make sure that -2 is not encountered, converts list of new neighbors
+	to appropriate data type, then context.writes, creating a new NodeWritable.
+     **/
     public static class LoaderReduce extends Reducer<LongWritable, LongWritable, 
 					     LongWritable, NodeWritable> {
 
@@ -222,7 +284,6 @@ public class SmallWorld {
 		while (iter.hasNext()) {
 		    LongWritable temp = iter.next();
 		    out[i] = temp;
-		    System.out.println(out[i].get());
 		    i++;
 		}
 	    } else {
@@ -233,6 +294,9 @@ public class SmallWorld {
 	}
     }
 
+    /** Third reducer. After recieving longwritable data from its mapper, it collates each distance by
+	the number of its occurences. The result is a histogram of each distance.
+    **/
     public static class OutputReduce extends Reducer<LongWritable, LongWritable,
 					     LongWritable, LongWritable> {
 
@@ -281,6 +345,8 @@ public class SmallWorld {
 
         job.setJarByClass(SmallWorld.class);
 
+	job.setNumReduceTasks(48);
+
         job.setMapOutputKeyClass(LongWritable.class);
         job.setMapOutputValueClass(LongWritable.class);
         job.setOutputKeyClass(LongWritable.class);
@@ -304,11 +370,12 @@ public class SmallWorld {
         while (i < MAX_ITERATIONS) {
 	    conf.set("depth", (new Long(i)).toString());
 	    job = new Job(conf, "bfs" + i);
+	    job.setNumReduceTasks(48);
             job.setJarByClass(SmallWorld.class);
 
             // Feel free to modify these four lines as necessary:
             job.setMapOutputKeyClass(LongWritable.class);
-            job.setMapOutputValueClass(NodeWritable.class);
+            job.setMapOutputValueClass(Notification.class);
             job.setOutputKeyClass(LongWritable.class);
             job.setOutputValueClass(NodeWritable.class);
 
@@ -331,6 +398,8 @@ public class SmallWorld {
         // Mapreduce config for histogram computation
         job = new Job(conf, "hist");
         job.setJarByClass(SmallWorld.class);
+
+	job.setNumReduceTasks(1);
 
         // Feel free to modify these two lines as necessary:
         job.setMapOutputKeyClass(LongWritable.class);
