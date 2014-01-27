@@ -1,0 +1,4 @@
+#For the purposes of this project, changes to makefile should not be allowed. 
+Makefile
+#Compiled code should also not be allowed in the repo. 
+*.class

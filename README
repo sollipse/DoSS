@@ -1,0 +1,11 @@
+The Degrees of Separation Searcher is a program that takes a .seq input (in NODE-NEIGHBOR form), and returns a histogram of all nodes from all neighbors.
+It could be used, for example, to find the average degrees of separation in a large social network. 
+
+This project was completed for the UC Berkeley Course CS61-C, and all modifications made from the skeleton file onwards are proprietary to:
+
+Paul Kang
+Lucas Sloan
+
+NOTE: The Makefile for this code is machine specific and will not function on most machines. In order to run SmallWorld.java, compile it from source and feed it into hadoop with a properly formatted .seq file.
+
+This Repo's purpose is to demonstrate a good understanding of the Hadoop framework, particularly a grasp of the WRITABLE classes, and the MAPPER and REDUCER utilities. 
