@@ -44,7 +44,11 @@ import org.apache.hadoop.util.GenericOptionsParser;
 
 public class SmallWorld {
     // Maximum depth for any breadth-first search
-    public static final int MAX_ITERATIONS = 5;
+    public static final int MAX_ITERATIONS = 20;
+    
+    public static final LongWritable NEGATIVETWO = new LongWritable(-2L);
+
+    public static final LongWritable NEGATIVEONE = new LongWritable(-1L);
 
     public static class LongArrayWritable extends ArrayWritable {
 	public LongArrayWritable() {
@@ -95,21 +99,23 @@ public class SmallWorld {
 	    throws IOException, InterruptedException {
             
 	    depth = Long.parseLong(context.getConfiguration().get("depth"));
-	    System.out.println("Current depth is " + depth);
+	    //System.out.println("Current depth is " + depth);
 
 	    Iterator<Writable> iterator = value._distances.keySet().iterator();
 	    while(iterator.hasNext()){
 		LongWritable source = (LongWritable) iterator.next();
-		if (((LongWritable) value._distances.get(source)).get() == depth - 1) {
+		if (((LongWritable) value._distances.get(source)).get() == depth - 1L) {
 		    LongWritable[] nullLong = new LongWritable[1];
-		    nullLong[0] = new LongWritable(-1);
+		    nullLong[0] = new LongWritable(-1L);
 		    LongArrayWritable nullNeighbor = new LongArrayWritable(nullLong);
 		    MapWritable notification = new MapWritable();
 		    notification.put(source, new LongWritable(depth));
 		    for (Writable temp : value._neighbors.get()) {
 			LongWritable neighbor = (LongWritable) temp;
-			System.out.print("Depth " + depth + " Notifying " + neighbor.get());
-			context.write(neighbor, new NodeWritable(nullNeighbor, notification));
+			if (neighbor.get() >= 0L) {
+			    //System.out.print("Depth " + depth + " Notifying " + neighbor.get());
+			    context.write(neighbor, new NodeWritable(nullNeighbor, notification));
+			}
 		    }
 		}
 	    }
@@ -124,7 +130,7 @@ public class SmallWorld {
 	    public void map(LongWritable key, LongWritable value, Context context)
 	    throws IOException, InterruptedException {
 	    context.write(key, value);
-	    context.write(value, new LongWritable(-2L));
+	    context.write(value, NEGATIVETWO);
         }
     }
 
@@ -134,7 +140,7 @@ public class SmallWorld {
         @Override
 	    public void map(LongWritable key, NodeWritable value, Context context)
 	    throws IOException, InterruptedException {
-	    LongWritable out = new LongWritable(1);
+	    LongWritable out = new LongWritable(1L);
 	    Iterator<Writable> iterator = value._distances.values().iterator();
 	    while(iterator.hasNext()){
 		LongWritable distance = (LongWritable) iterator.next();
@@ -172,7 +178,7 @@ public class SmallWorld {
 		MapWritable outdistances = new MapWritable();
 		LongArrayWritable outneighbors = new LongArrayWritable();
 		for (NodeWritable value : values) {
-		    if (((LongWritable) value._neighbors.get()[0]).get() != -1) {
+		    if (((LongWritable) value._neighbors.get()[0]).get() != -1L) {
 			outneighbors = value._neighbors;
 		    }
 		    Iterator<Writable> iterator = value._distances.keySet().iterator();
@@ -202,11 +208,26 @@ public class SmallWorld {
 
         public void reduce(LongWritable key, Iterable<LongWritable> values, 
 			   Context context) throws IOException, InterruptedException {
-	    LinkedList<LongWritable> output = new LinkedList<LongWritable>();
-	    System.out.println(output.size());
-	    LongWritable[] out = new LongWritable[output.size()];
-	    for (int i = 0; i < output.size(); i++) {
-		out[i] = output.pop();
+	    HashSet<LongWritable> output = new HashSet<LongWritable>();
+	    int i = 0;
+	    for (LongWritable value : values) {
+		if (value.get() >= 0) {
+		    output.add(new LongWritable(value.get()));
+		}
+	    }
+	    LongWritable[] out;
+	    if (output.size() > 0) { 
+	        out = new LongWritable[output.size()];
+		Iterator<LongWritable> iter = output.iterator();
+		while (iter.hasNext()) {
+		    LongWritable temp = iter.next();
+		    out[i] = temp;
+		    System.out.println(out[i].get());
+		    i++;
+		}
+	    } else {
+		out = new LongWritable[1];
+		out[0] = NEGATIVETWO;
 	    }
 	    context.write(key, new NodeWritable(new LongArrayWritable(out), new MapWritable()));
 	}
